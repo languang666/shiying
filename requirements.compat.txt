@@ -24,6 +24,6 @@ typing_extensions==4.16.0
 urllib3==2.8.0
 uvicorn==0.54.0
 websockets==17.2
-yt-dlp[default]==2026.10.21
+yt-dlp[default]==2026.10.26
 yt-dlp-ejs==0.8.0
 bgutil-ytdlp-pot-provider==2.0.2

@@ -308,7 +308,7 @@
         const randTag = Math.random().toString(36).substring(2, 6);
 
         const seen = new Set(), imageList = [];
-        let gallery = null, batchBar = null, archiveUrl = null;
+        let gallery = null, batchBar = null, archiveUrl = null, videoBar = null, videoCount = 0;
         $('media').replaceChildren();
         $('files').replaceChildren();
         return d => {
@@ -372,6 +372,45 @@
           };
           $('files').append(row);
         }
+
+        // 1.2 多视频作品：一键打包全部视频
+        videoCount = (d.files || []).filter(f => f.kind === 'video' && f.state === 'done').length;
+        if (videoCount > 1 && !videoBar) {
+          videoBar = document.createElement('div');
+          videoBar.className = 'batch-bar';
+          videoBar.innerHTML = `
+            <div class="batch-info">
+              <div class="batch-title">
+                <span>🎬 多视频作品</span>
+                <span class="batch-badge"></span>
+              </div>
+              <div class="batch-hint">下方可逐个单独下载视频；也可点击右侧一键打包为 ZIP 压缩包</div>
+            </div>
+            <div class="batch-actions">
+              <button type="button" class="btn-batch-zip">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <span>打包下载全部视频 (ZIP)</span>
+              </button>
+            </div>
+          `;
+          $('files').prepend(videoBar);
+          const videoZipBtn = videoBar.querySelector('.btn-batch-zip');
+          videoZipBtn.onclick = () => {
+            if (!archiveUrl) return status('请等待视频准备完成后再打包', true);
+            const originalHTML = videoZipBtn.innerHTML;
+            const zipName = `【${pName}】${cleanAuthor ? cleanAuthor + '_' : ''}${cleanTitle}_共${videoCount}个视频_${timeTag}_${randTag}.zip`;
+            const link = document.createElement('a');
+            link.href = archiveUrl + '?kind=video&fn=' + encodeURIComponent(zipName);
+            link.download = zipName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            videoZipBtn.disabled = true;
+            videoZipBtn.textContent = '打包下载已启动';
+            setTimeout(() => { videoZipBtn.disabled = !archiveUrl; videoZipBtn.innerHTML = originalHTML; }, 2000);
+          };
+        }
+        if (videoBar) videoBar.querySelector('.batch-badge').textContent = `共 ${videoCount} 个视频`;
 
         // 1.5 封面图渲染
         for (const cf of coverFiles) {

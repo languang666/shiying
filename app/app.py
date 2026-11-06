@@ -331,8 +331,8 @@ async def download_status(job_id:str,request:Request,wait:float=0,after:str=''):
  if j['type']!='download':raise HTTPException(400)
  if 'download_id' in j and j.get('state') not in TERMINAL:ensure_monitor(job_id)
  if wait>0 and after:await wait_change(job_id,after,wait)
- ready_images=sum(f.get('kind')=='image' and f.get('state')=='done' for f in j['files'])
- zip_url='/api/download/'+job_id+'/zip' if j['state'] in ('done','partial') and ready_images>1 else None
+ ready={kind:sum(f.get('kind')==kind and f.get('state')=='done' for f in j['files']) for kind in ZIP_KINDS}
+ zip_url='/api/download/'+job_id+'/zip' if j['state'] in ('done','partial') and max(ready.values())>1 else None
  return {'state':j['state'],'error':j.get('error'),'error_code':j.get('error_code'),'retry_after':max(0,int(j.get('retry_at',0)-time.time()+0.999)),'zip_url':zip_url,'version':job_version(j),'files':[{'name':f['name'],'kind':f['kind'],'bytes':f.get('bytes',0),'state':f['state'],'error':f.get('error'),'url':'/api/file/'+job_id+'/'+quote(f['name'])} for f in j['files']]}
 @app.get('/api/file/{job_id}/{name}')
 async def file(job_id:str,name:str,request:Request,preview:bool=False,fn:str=None):
@@ -558,18 +558,22 @@ async def expand_share(platform,url):
  except Exception:raise HTTPException(502,'分享短链接暂时无法打开，请使用完整作品链接')
 
 
+ZIP_KINDS=('image','video')
+
 @app.get('/api/download/{job_id}/zip')
-async def image_zip(job_id:str,request:Request,fn:str=None):
+async def media_zip(job_id:str,request:Request,fn:str=None,kind:str='image'):
  j=owned(job_id,session(request))
- if j.get('state') not in ('done','partial'):raise HTTPException(409,'请等待图片准备完成')
- images=[dict(f) for f in j.get('files',[]) if f.get('kind')=='image' and f.get('state')=='done']
- if not images:raise HTTPException(404,'没有已就绪图片')
+ if kind not in ZIP_KINDS:raise HTTPException(400,'不支持的打包类型')
+ label='图片' if kind=='image' else '视频'
+ if j.get('state') not in ('done','partial'):raise HTTPException(409,'请等待'+label+'准备完成')
+ images=[dict(f) for f in j.get('files',[]) if f.get('kind')==kind and f.get('state')=='done']
+ if not images:raise HTTPException(404,'没有已就绪'+label)
  rate('zip:'+request.headers.get('x-real-ip',request.client.host),n=5)
  if sum(app.state.disk.readers.values())>=8:raise HTTPException(429,'下载繁忙，请稍后重试')
  for index,item in enumerate(images):
-  item['zip_name']=f"image-{index+1:02d}"+os.path.splitext(item['name'])[1]
+  item['zip_name']=f"{kind}-{index+1:02d}"+os.path.splitext(item['name'])[1]
   if item.get('local_name') and not (ROOT/item['local_name']).is_file():raise HTTPException(404,'下载缓存已清理，请重新解析')
- title=re.sub(r'[\\/:*?"<>|\r\n\t]','_',fn or j.get('title') or '图集').strip()[:140]
+ title=re.sub(r'[\\/:*?"<>|\r\n\t]','_',fn or j.get('title') or ('图集' if kind=='image' else '视频合集')).strip()[:140]
  if not title.lower().endswith('.zip'):title+='.zip'
  async def source(item):
   if item.get('local_name'):
@@ -587,6 +591,6 @@ async def image_zip(job_id:str,request:Request,fn:str=None):
    event('zip.failed',job=job_id,code=error_code(error),detail=str(error));raise
   finally:app.state.disk.unprotect(job_id)
  app.state.disk.protect(job_id)
- return StreamingResponse(chunks(),media_type='application/zip',headers={'Content-Disposition':"attachment; filename=images.zip; filename*=UTF-8''"+quote(title),'X-Accel-Buffering':'no'})
+ return StreamingResponse(chunks(),media_type='application/zip',headers={'Content-Disposition':"attachment; filename="+kind+"s.zip; filename*=UTF-8''"+quote(title),'X-Accel-Buffering':'no'})
 
 app.mount('/static',StaticFiles(directory='/site/static'),name='static')
