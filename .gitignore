@@ -1,0 +1,6 @@
+.env
+credentials/*
+!credentials/app.env.example
+data/
+__pycache__/
+*.pyc

@@ -1,0 +1,91 @@
+name: shiying
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  read_only: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+
+services:
+  site:
+    <<: *hardening
+    build: .
+    image: local/shiying:latest
+    pull_policy: never
+    container_name: shiying-site
+    env_file:
+      - path: ./credentials/app.env
+        required: true
+    environment:
+      # Douyin / TikTok go through a Douyin_TikTok_Download_API backend; set its address here.
+      BACKEND_URL: ${BACKEND_URL:-http://api:8000}
+      SITE_REDIS_URL: redis://redis:6379/0
+      SITE_YOUTUBE_POT_URL: http://youtube-pot:4416
+      SITE_PARSE_CONCURRENCY: '2'
+      SITE_DOWNLOAD_CONCURRENCY: '2'
+      SITE_MEDIA_ITEM_WORKERS: '4'
+      SITE_DISK_QUOTA_BYTES: '12884901888'
+      SITE_DISK_MIN_FREE_BYTES: '1073741824'
+      SITE_JOB_RESERVE_BYTES: '4294967296'
+      SITE_YOUTUBE_INTERVAL: '5'
+      SITE_QUEUE_TIMEOUT: '300'
+    ports:
+      # Put a TLS reverse proxy (Caddy, nginx) in front; do not expose this port directly.
+      - 127.0.0.1:${SITE_PORT:-8080}:8080
+    volumes:
+      - ./data:/data
+    tmpfs: [/tmp:size=64m]
+    user: 10001:10001
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 256
+    networks: [default, youtube]
+    depends_on:
+      redis: {condition: service_healthy}
+      youtube-pot: {condition: service_healthy}
+
+  redis:
+    <<: *hardening
+    image: redis:8-alpine
+    container_name: shiying-redis
+    # Run as the image's redis user: with all capabilities dropped, root could not write the volume.
+    user: '999:999'
+    command: [redis-server, --appendonly, 'yes', --save, '60 1']
+    volumes:
+      - redis-data:/data
+    mem_limit: 256m
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  youtube-pot:
+    <<: *hardening
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
+    container_name: shiying-youtube-pot
+    init: true
+    environment:
+      NODE_OPTIONS: --require=/app/log-safe.cjs
+    volumes:
+      - ./provider-log.cjs:/app/log-safe.cjs:ro
+    tmpfs: [/tmp:size=128m]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    networks: [youtube]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4416/ping').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+networks:
+  default: {}
+  youtube: {}
+
+volumes:
+  redis-data: {}
